@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AdSpend, SalesData, Platform, AppSettings } from '../types';
 import { INITIAL_SPEND, INITIAL_SALES, PLATFORMS, INITIAL_PLATFORM_SALES } from '../constants';
 import { Card } from './ui/Card';
-import { Calendar, Building, Globe, ShoppingCart, Percent, TrendingUp, Store } from 'lucide-react';
+import { Calendar, Building, Globe, TrendingUp } from 'lucide-react';
 
 interface ReportFormProps {
   settings: AppSettings;
@@ -25,8 +25,15 @@ export const ReportForm: React.FC<ReportFormProps> = ({ settings, onSubmit, init
       setPlatform(initialData.platform);
       setSpend(initialData.spend);
       setSales(initialData.sales);
+    } else {
+      // Reset to defaults if no initialData (creating new)
+      setDate(new Date().toISOString().split('T')[0]);
+      setBrandName(settings.defaultBrand || '');
+      setPlatform(Platform.META);
+      setSpend(INITIAL_SPEND);
+      setSales(INITIAL_SALES);
     }
-  }, [initialData]);
+  }, [initialData, settings.defaultBrand]);
 
   const handleSpendChange = (field: keyof AdSpend, value: string) => {
     setSpend(prev => ({ ...prev, [field]: parseFloat(value) || 0 }));
@@ -39,7 +46,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({ settings, onSubmit, init
     }));
   };
 
-  const totalSpend = Object.values(spend).reduce((a, b) => a + b, 0);
+  // Fixed TypeScript error on line 49 by providing an explicit type cast for spend values
+  const totalSpend = (Object.values(spend) as number[]).reduce((a, b) => a + b, 0);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,7 +166,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({ settings, onSubmit, init
         className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold text-lg shadow-xl shadow-indigo-200 transition-all flex items-center justify-center gap-2 group dark:shadow-none"
       >
         <TrendingUp className="w-5 h-5 group-hover:scale-110 transition-transform" />
-        Generate Report & Save to Database
+        {initialData ? 'Update Report' : 'Generate Report & Save to Database'}
       </button>
     </form>
   );

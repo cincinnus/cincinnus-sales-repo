@@ -18,6 +18,15 @@
         h1, h2, h3, .font-poppins {
             font-family: 'Poppins', sans-serif;
         }
+        .loading-shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
     </style>
 <script type="importmap">
 {
@@ -28,7 +37,8 @@
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
     "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
     "recharts": "https://esm.sh/recharts@^3.7.0",
-    "html-to-image": "https://esm.sh/html-to-image@^1.11.13"
+    "html-to-image": "https://esm.sh/html-to-image@^1.11.13",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.1"
   }
 }
 </script>

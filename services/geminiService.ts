@@ -8,7 +8,8 @@ export const generateAIInsights = async (report: Report): Promise<string[]> => {
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const salesBreakdown = Object.entries(report.sales)
+  // Cast Object.entries to [string, any][] to avoid potential TypeScript errors if keys/values are inferred as unknown
+  const salesBreakdown = (Object.entries(report.sales) as [string, any][])
     .filter(([_, data]) => data.revenue > 0)
     .map(([channel, data]) => `- ${channel}: Revenue ${data.revenue}, Orders ${data.orders}`)
     .join('\n');

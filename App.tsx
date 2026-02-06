@@ -8,57 +8,82 @@ import { ReportForm } from './components/ReportForm';
 import { ReportDashboard } from './components/ReportDashboard';
 import { AggregationReport } from './components/AggregationReport';
 import { ExportTemplate } from './components/ExportTemplate';
-import { Settings, Plus, LayoutDashboard, History, ShieldCheck, ChevronLeft, Trash2, Calendar, FileText, Download } from 'lucide-react';
+import { Settings, Plus, LayoutDashboard, History, ShieldCheck, ChevronLeft, Trash2, Calendar, FileText, Download, Edit2, Database, Loader2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
+import { DEFAULT_SETTINGS } from './constants';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'dashboard' | 'form' | 'history' | 'settings' | 'agg_reports'>('history');
   const [reports, setReports] = useState<Report[]>([]);
-  const [settings, setSettings] = useState<AppSettings>(storageService.getSettings());
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [activeReport, setActiveReport] = useState<Report | null>(null);
+  const [editingReport, setEditingReport] = useState<Report | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
   
   const squareExportRef = useRef<HTMLDivElement>(null);
   const portraitExportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    refreshData();
+    const initApp = async () => {
+      setIsLoading(true);
+      const [cloudReports, cloudSettings] = await Promise.all([
+        storageService.getReports(),
+        storageService.getSettings()
+      ]);
+      setReports(cloudReports);
+      setSettings(cloudSettings);
+      setIsLoading(false);
+    };
+    initApp();
   }, []);
 
-  const refreshData = () => {
-    const data = storageService.getReports().sort((a, b) => b.date.localeCompare(a.date));
-    setReports(data);
+  const refreshData = async () => {
+    setIsSyncing(true);
+    const data = await storageService.getReports();
+    setReports(data.sort((a, b) => b.date.localeCompare(a.date)));
+    setIsSyncing(false);
   };
 
   const handleSaveReport = async (formData: any) => {
+    setIsSyncing(true);
     const metrics = calculateMetrics(formData.spend, formData.sales);
     const status = determineStatus(metrics, settings);
     
     const newReport: Report = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: editingReport ? editingReport.id : Math.random().toString(36).substr(2, 9),
       ...formData,
       metrics,
       status,
-      insights: []
+      insights: editingReport ? editingReport.insights : []
     };
 
-    // Database save happens immediately
-    storageService.saveReport(newReport);
-    refreshData();
+    await storageService.saveReport(newReport);
+    await refreshData();
     setActiveReport(newReport);
+    setEditingReport(null);
     setView('dashboard');
-    setIsLoadingInsights(true);
 
-    try {
-      const insights = await generateAIInsights(newReport);
-      newReport.insights = insights;
-      storageService.saveReport(newReport); // Update in DB with AI insights
-      refreshData();
-    } catch (err) {
-      console.error("Failed to generate AI insights:", err);
-    } finally {
-      setIsLoadingInsights(false);
+    if (!editingReport || !editingReport.insights || editingReport.insights.length === 0) {
+      setIsLoadingInsights(true);
+      try {
+        const insights = await generateAIInsights(newReport);
+        newReport.insights = insights;
+        await storageService.saveReport(newReport);
+        await refreshData();
+      } catch (err) {
+        console.error("Failed to generate AI insights:", err);
+      } finally {
+        setIsLoadingInsights(false);
+      }
     }
+    setIsSyncing(false);
+  };
+
+  const handleEditReport = (report: Report) => {
+    setEditingReport(report);
+    setView('form');
   };
 
   const handleExportImage = async () => {
@@ -91,17 +116,25 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteReport = (id: string) => {
-    if (window.confirm('Are you sure you want to permanently delete this record from the Cincinnus database?')) {
-      storageService.deleteReport(id);
-      refreshData();
+  const handleDeleteReport = async (id: string) => {
+    if (window.confirm('Are you sure you want to permanently delete this record from the shared Supabase database?')) {
+      setIsSyncing(true);
+      await storageService.deleteReport(id);
+      await refreshData();
       if (activeReport?.id === id) setActiveReport(null);
+      if (editingReport?.id === id) setEditingReport(null);
+      setIsSyncing(false);
     }
+  };
+
+  const updateSettings = async (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    await storageService.saveSettings(newSettings);
   };
 
   const NavItem = ({ icon: Icon, label, id, active }: any) => (
     <button 
-      onClick={() => setView(id)}
+      onClick={() => { setView(id); setEditingReport(null); }}
       className={`flex flex-col items-center gap-1.5 py-3 px-4 transition-all relative ${
         active ? 'text-indigo-600 scale-105' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
       }`}
@@ -112,23 +145,44 @@ const App: React.FC = () => {
     </button>
   );
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6">
+        <div className="relative">
+          <div className="w-24 h-24 bg-indigo-600 rounded-[2rem] flex items-center justify-center animate-pulse">
+            <ShieldCheck className="w-12 h-12 text-white" />
+          </div>
+          <Loader2 className="w-6 h-6 text-indigo-600 absolute -bottom-8 left-1/2 -translate-x-1/2 animate-spin" />
+        </div>
+        <h2 className="text-xl font-bold mt-12 font-poppins tracking-tight">Connecting to Supabase Cloud...</h2>
+        <p className="text-slate-500 mt-2 text-sm">Synchronizing shared marketing reports</p>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen pb-24 transition-colors duration-300 ${settings.theme === 'dark' ? 'dark bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
       
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 px-6 py-4">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('history')}>
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setView('history'); setEditingReport(null); }}>
             <div className="bg-indigo-600 p-2.5 rounded-2xl text-white shadow-lg shadow-indigo-100 dark:shadow-none">
                <ShieldCheck className="w-6 h-6" />
             </div>
-            <span className="text-xl font-bold font-poppins tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-indigo-400">
-              Cincinnus Report
-            </span>
+            <div className="flex flex-col">
+              <span className="text-xl font-bold font-poppins tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-indigo-400">
+                Cincinnus Report
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Database className={`w-3 h-3 ${isSyncing ? 'text-amber-500 animate-pulse' : 'text-cyan-500'}`} />
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">{isSyncing ? 'Syncing...' : 'Supabase Linked'}</span>
+              </div>
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
             <button 
-               onClick={() => setView('form')}
+               onClick={() => { setView('form'); setEditingReport(null); }}
                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-2xl flex items-center gap-2 font-bold text-sm shadow-xl shadow-indigo-100 dark:shadow-none transition-all active:scale-95"
             >
               <Plus className="w-4 h-4" /> New Entry
@@ -140,11 +194,11 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto p-6">
         {view === 'form' && (
           <div className="max-w-4xl mx-auto">
-             <div className="flex items-center gap-2 mb-8 cursor-pointer text-slate-500 hover:text-indigo-600 transition-colors" onClick={() => setView('history')}>
+             <div className="flex items-center gap-2 mb-8 cursor-pointer text-slate-500 hover:text-indigo-600 transition-colors" onClick={() => { setView('history'); setEditingReport(null); }}>
                 <ChevronLeft className="w-5 h-5" /> Back to History
              </div>
-             <h2 className="text-3xl font-bold mb-8 font-poppins">Daily Sales Log</h2>
-             <ReportForm settings={settings} onSubmit={handleSaveReport} />
+             <h2 className="text-3xl font-bold mb-8 font-poppins">{editingReport ? 'Edit Sales Entry' : 'Daily Sales Log'}</h2>
+             <ReportForm settings={settings} onSubmit={handleSaveReport} initialData={editingReport} />
           </div>
         )}
 
@@ -155,7 +209,7 @@ const App: React.FC = () => {
              </div>
              <ReportDashboard 
                report={activeReport} 
-               previousReport={storageService.getPreviousDayReport(activeReport.date)} 
+               previousReport={null} 
                settings={settings}
                onExportImage={handleExportImage}
              />
@@ -167,7 +221,7 @@ const App: React.FC = () => {
         {view === 'agg_reports' && (
           <div className="max-w-5xl mx-auto">
              <h2 className="text-3xl font-bold mb-8 font-poppins">Reporting & Analytics</h2>
-             <AggregationReport reports={reports} settings={settings} />
+             <AggregationReport reports={reports} settings={settings} onEdit={handleEditReport} onDelete={handleDeleteReport} />
           </div>
         )}
 
@@ -197,15 +251,20 @@ const App: React.FC = () => {
                  {reports.map((report) => (
                    <div 
                     key={report.id} 
-                    className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 p-7 shadow-sm hover:shadow-2xl hover:-translate-y-1 transition-all group"
+                    className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 p-7 shadow-sm hover:shadow-2xl hover:-translate-y-1 transition-all group relative"
                    >
                      <div className="flex justify-between items-start mb-5">
                         <div className="text-xs font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1.5 rounded-lg">
                           {new Date(report.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </div>
-                        <button onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-rose-50 rounded-lg">
-                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); handleEditReport(report); }} className="p-2 text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-all hover:bg-indigo-50 rounded-lg">
+                             <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }} className="p-2 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-rose-50 rounded-lg">
+                             <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                      </div>
                      <h4 className="text-xl font-bold mb-3 truncate font-poppins">{report.brandName}</h4>
                      <div className="grid grid-cols-2 gap-4 mb-8">
@@ -240,11 +299,7 @@ const App: React.FC = () => {
                    <label className="text-sm font-bold text-slate-400 uppercase tracking-widest">Global Currency</label>
                    <select 
                     value={settings.currency}
-                    onChange={(e) => {
-                      const newSettings = { ...settings, currency: e.target.value };
-                      setSettings(newSettings);
-                      storageService.saveSettings(newSettings);
-                    }}
+                    onChange={(e) => updateSettings({ ...settings, currency: e.target.value })}
                     className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                    >
                      <option value="₹">Indian Rupee (₹)</option>
@@ -261,11 +316,7 @@ const App: React.FC = () => {
                       type="number" 
                       step="0.1"
                       value={settings.targetRoas}
-                      onChange={(e) => {
-                        const newSettings = { ...settings, targetRoas: parseFloat(e.target.value) || 0 };
-                        setSettings(newSettings);
-                        storageService.saveSettings(newSettings);
-                      }}
+                      onChange={(e) => updateSettings({ ...settings, targetRoas: parseFloat(e.target.value) || 0 })}
                       className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                     />
                   </div>
@@ -274,11 +325,7 @@ const App: React.FC = () => {
                     <input 
                       type="number" 
                       value={settings.targetCpo}
-                      onChange={(e) => {
-                        const newSettings = { ...settings, targetCpo: parseFloat(e.target.value) || 0 };
-                        setSettings(newSettings);
-                        storageService.saveSettings(newSettings);
-                      }}
+                      onChange={(e) => updateSettings({ ...settings, targetCpo: parseFloat(e.target.value) || 0 })}
                       className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                     />
                   </div>
@@ -289,11 +336,7 @@ const App: React.FC = () => {
                    <input 
                     type="text" 
                     value={settings.defaultBrand}
-                    onChange={(e) => {
-                      const newSettings = { ...settings, defaultBrand: e.target.value };
-                      setSettings(newSettings);
-                      storageService.saveSettings(newSettings);
-                    }}
+                    onChange={(e) => updateSettings({ ...settings, defaultBrand: e.target.value })}
                     placeholder="Enter business name"
                     className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 dark:bg-slate-800 dark:border-slate-700 font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                    />
@@ -306,11 +349,11 @@ const App: React.FC = () => {
                             <ShieldCheck className="w-6 h-6 text-indigo-600" />
                          </div>
                          <div>
-                            <span className="block font-bold text-indigo-900 dark:text-indigo-200 text-sm">Automated Storage</span>
-                            <span className="text-xs text-indigo-600/70 font-bold uppercase tracking-wider">Database Sync Active</span>
+                            <span className="block font-bold text-indigo-900 dark:text-indigo-200 text-sm">Supabase Linked</span>
+                            <span className="text-xs text-indigo-600/70 font-bold uppercase tracking-wider">Shared Cloud Persistence</span>
                          </div>
                       </div>
-                      <span className="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded font-bold uppercase tracking-widest">Secured</span>
+                      <span className="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded font-bold uppercase tracking-widest">Active</span>
                    </div>
                 </div>
              </div>

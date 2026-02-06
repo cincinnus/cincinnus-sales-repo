@@ -2,14 +2,16 @@
 import React, { useState } from 'react';
 import { Report, AppSettings } from '../types';
 import { Card } from './ui/Card';
-import { FileDown, Calendar as CalendarIcon, CheckCircle2, TrendingUp, DollarSign, Target } from 'lucide-react';
+import { FileDown, Calendar as CalendarIcon, CheckCircle2, TrendingUp, DollarSign, Target, Edit2, Trash2, Eye } from 'lucide-react';
 
 interface AggregationReportProps {
   reports: Report[];
   settings: AppSettings;
+  onEdit: (report: Report) => void;
+  onDelete: (id: string) => void;
 }
 
-export const AggregationReport: React.FC<AggregationReportProps> = ({ reports, settings }) => {
+export const AggregationReport: React.FC<AggregationReportProps> = ({ reports, settings, onEdit, onDelete }) => {
   const [range, setRange] = useState<'week' | 'month' | 'custom'>('week');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -18,27 +20,27 @@ export const AggregationReport: React.FC<AggregationReportProps> = ({ reports, s
     const now = new Date();
     now.setHours(23, 59, 59, 999);
     
+    let filtered = reports;
     if (range === 'week') {
       const weekAgo = new Date();
       weekAgo.setDate(now.getDate() - 7);
       weekAgo.setHours(0, 0, 0, 0);
-      return reports.filter(r => new Date(r.date) >= weekAgo);
-    }
-    if (range === 'month') {
+      filtered = reports.filter(r => new Date(r.date) >= weekAgo);
+    } else if (range === 'month') {
       const monthAgo = new Date();
       monthAgo.setMonth(now.getMonth() - 1);
       monthAgo.setHours(0, 0, 0, 0);
-      return reports.filter(r => new Date(r.date) >= monthAgo);
+      filtered = reports.filter(r => new Date(r.date) >= monthAgo);
+    } else if (range === 'custom' && startDate && endDate) {
+      filtered = reports.filter(r => r.date >= startDate && r.date <= endDate);
     }
-    if (range === 'custom' && startDate && endDate) {
-      return reports.filter(r => r.date >= startDate && r.date <= endDate);
-    }
-    return reports;
+    return filtered.sort((a, b) => b.date.localeCompare(a.date));
   };
 
+  const filteredReports = getFilteredReports();
+
   const downloadCSV = () => {
-    const filtered = getFilteredReports().sort((a, b) => a.date.localeCompare(b.date));
-    if (filtered.length === 0) {
+    if (filteredReports.length === 0) {
       alert('No data available in the selected range to export.');
       return;
     }
@@ -48,7 +50,7 @@ export const AggregationReport: React.FC<AggregationReportProps> = ({ reports, s
       'Website Rev', 'Amazon Rev', 'Flipkart Rev', 'Blinkit Rev', 'Myntra Rev', 'Offline Rev'
     ];
 
-    const rows = filtered.map(r => [
+    const rows = filteredReports.map(r => [
       r.date, 
       `"${r.brandName}"`, 
       r.platform,
@@ -81,7 +83,7 @@ export const AggregationReport: React.FC<AggregationReportProps> = ({ reports, s
     document.body.removeChild(link);
   };
 
-  const stats = getFilteredReports().reduce((acc, r) => ({
+  const stats = filteredReports.reduce((acc, r) => ({
     revenue: acc.revenue + r.metrics.totalRevenue,
     spend: acc.spend + r.metrics.totalSpend,
     orders: acc.orders + r.metrics.totalOrders,
@@ -164,6 +166,62 @@ export const AggregationReport: React.FC<AggregationReportProps> = ({ reports, s
           >
             <FileDown className="w-5 h-5" /> Download Excel-Ready CSV
           </button>
+        </div>
+      </Card>
+
+      <Card title="Detailed Entries" subtitle="Manage individual report records">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-slate-100 dark:border-slate-800">
+                <th className="py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Date</th>
+                <th className="py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Brand</th>
+                <th className="py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">Revenue</th>
+                <th className="py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">ROAS</th>
+                <th className="py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReports.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-slate-400 font-medium">No reports found for this range.</td>
+                </tr>
+              ) : (
+                filteredReports.map((report) => (
+                  <tr key={report.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                    <td className="py-4 font-medium dark:text-slate-300">{new Date(report.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                    <td className="py-4 font-bold dark:text-white truncate max-w-[150px]">{report.brandName}</td>
+                    <td className="py-4 text-right font-medium dark:text-slate-200">{settings.currency}{report.metrics.totalRevenue.toLocaleString()}</td>
+                    <td className="py-4 text-right">
+                       <span className={`font-bold px-2 py-0.5 rounded text-xs ${
+                          report.metrics.roas >= settings.targetRoas ? 'text-emerald-500 bg-emerald-50' : 'text-rose-500 bg-rose-50'
+                       }`}>
+                          {report.metrics.roas.toFixed(2)}
+                       </span>
+                    </td>
+                    <td className="py-4">
+                      <div className="flex justify-center gap-2">
+                         <button 
+                           onClick={() => onEdit(report)}
+                           className="p-2 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-colors"
+                           title="Edit Report"
+                         >
+                           <Edit2 className="w-4 h-4" />
+                         </button>
+                         <button 
+                           onClick={() => onDelete(report.id)}
+                           className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors"
+                           title="Delete Report"
+                         >
+                           <Trash2 className="w-4 h-4" />
+                         </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </Card>
       
